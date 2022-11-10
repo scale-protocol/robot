@@ -15,7 +15,7 @@ const PYTH_PROGRAM_DEVNET: &str = "gSbePebfvPy7tRqimPoVecS2UsBvYv46ynrzWocc92s";
 const PYTH_PROGRAM_TESTNET: &str = "8tfDNiaEyrV6Q1U4DEXrEigs9DoDtkugzFbybENEbCDz";
 const PYTH_PROGRAM_MAINNET: &str = "FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH";
 
-const SPL_MINT_DEVNET: &str = "5Uzq44UgPkPNxG4E4m4m7F8fsnrHKc4jFvFuPapV4jN2";
+const SPL_MINT_DEVNET: &str = "3xJL46KjjDQbPUDg54nEzSC1Ejs49xFHwQJyEMPq7H7g";
 const SPL_MINT_TESTNET: &str = "6jTrKM4mobEdWyW3VC2XcDadXTVZ7x9qMfCmF4ZVbSgq";
 const SPL_MINT_MAINNET: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 #[derive(Debug, Clone)]

@@ -11,10 +11,27 @@ use super::{
     sub,
 };
 
-pub fn run(ctx: com::Context) -> anyhow::Result<()> {
-    let threads: usize = 4;
-    let runtime = Builder::new_multi_thread()
-        .worker_threads(threads)
+pub fn run(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Result<()> {
+    let tasks = match args.get_one::<usize>("tasks") {
+        Some(t) => *t,
+        None => 20,
+    };
+    let port = match args.get_one::<u64>("port") {
+        Some(p) => *p,
+        None => 3000,
+    };
+    let ip = match args.get_one::<String>("ip") {
+        Some(i) => i.to_string(),
+        None => "127.0.0.1".to_string(),
+    };
+    let mut builder = Builder::new_multi_thread();
+    match args.get_one::<usize>("threads") {
+        Some(t) => {
+            builder.worker_threads(*t);
+        }
+        None => {}
+    }
+    let runtime = builder
         .thread_name_fn(|| {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
             let id = ATOMIC_ID.fetch_add(1, Ordering::Relaxed);
@@ -37,7 +54,7 @@ pub fn run(ctx: com::Context) -> anyhow::Result<()> {
             watch.price_watch_tx.clone(),
         )
         .await;
-        let liquidation = Liquidation::new(config.clone(), mp, 2).await;
+        let liquidation = Liquidation::new(config.clone(), mp, tasks).await;
         (watch, sub, liquidation)
     });
 

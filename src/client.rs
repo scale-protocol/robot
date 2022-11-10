@@ -18,7 +18,7 @@ pub fn init_vault(ctx: com::Context) -> anyhow::Result<()> {
         .request()
         .accounts(accounts::InitializeVault {
             initializer: program.payer(),
-            vault_account: vault_account,
+            vault_account,
             token_mint: ctx.config.accounts.spl_mint,
             system_program: system_program::id(),
             token_program: spl_token::id(),

@@ -1,7 +1,7 @@
 localmint:
 	spl-token create-token --decimals 6 -- local_mint.json
 	spl-token create-account -- local_mint.json
-	spl-token mint 5Uzq44UgPkPNxG4E4m4m7F8fsnrHKc4jFvFuPapV4jN2 10000000000
+	spl-token mint 3xJL46KjjDQbPUDg54nEzSC1Ejs49xFHwQJyEMPq7H7g 1000000000000
 initvault:
 	cargo run init_vault
 initmarket:
@@ -16,9 +16,9 @@ inituser:
 deposit:
 	cargo run deposit -a 1000
 investment:
-	cargo run investment -p 'BTC/USD' -a 10000
-	cargo run investment -p 'ETH/USD' -a 10000
-	cargo run investment -p 'SOL/USD' -a 10000
+	cargo run investment -p 'BTC/USD' -a 100000000
+	cargo run investment -p 'ETH/USD' -a 100000000
+	cargo run investment -p 'SOL/USD' -a 100000000
 divestment:
 	cargo run divestment -p 'BTC/USD' -a 10000
 	cargo run divestment -p 'ETH/USD' -a 5000

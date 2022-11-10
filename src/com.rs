@@ -30,7 +30,7 @@ pub enum CliError {
     KeypairError(String),
 }
 pub fn id() -> Pubkey {
-    Pubkey::try_from("3CuC9qc7ehNu3MrGrqDMu6it2g71dFJTKn7184sb1TuJ").unwrap()
+    Pubkey::try_from("ECte5vr5zJkRVnEPY9XPkgq3JFfFkthrMKxLk6gfa7v4").unwrap()
 }
 pub struct Context<'a> {
     pub config: &'a config::Config,

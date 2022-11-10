@@ -7,7 +7,7 @@ use clap::{arg, Command};
 use log::debug;
 use std::ffi::OsString;
 use std::path::PathBuf;
-fn cli<'help>() -> Command<'help> {
+fn cli() -> Command {
     Command::new("Scale contract command line operator.")
         .about("Scale contract command line operator. More https://www.scale.exchange")
         .version("0.1.0")
@@ -75,6 +75,10 @@ fn cli<'help>() -> Command<'help> {
         .subcommand(
             Command::new("bot")
                 .about("Start a settlement robot. Monitor the trading market and close risk positions in a timely manner")
+                .arg(arg!(-T --threads <THREADS> "The number of threads that can be started by the robot, which defaults to the number of system cores.").value_parser(clap::value_parser!(usize)))
+                .arg(arg!(-t --tasks <TASKS> "The number of settlement tasks that the robot can open, corresponding to the number of tasks in the tokio, 20 by default.").value_parser(clap::value_parser!(usize)))
+                .arg(arg!(-p --port <PORT> "The web server port provides http query service and websocket push service. The default value is 3000. If it is set to 0, the web service is disabled.").value_parser(clap::value_parser!(u64)))
+                .arg(arg!(-i --ip <IP> "The IP address bound to the web server. The default is 127.0.0.1."))
         )
 }
 
@@ -152,10 +156,10 @@ pub fn run() -> anyhow::Result<()> {
             let ctx = com::Context::new(&config, &client);
             client::divestment(ctx, sub_matches)?;
         }
-        Some(("bot", _sub_matches)) => {
+        Some(("bot", sub_matches)) => {
             let client = com::Context::new_client(&config)?;
             let ctx = com::Context::new(&config, &client);
-            app::run(ctx)?
+            app::run(ctx, sub_matches)?
         }
         Some((ext, sub_matches)) => {
             let args = sub_matches
