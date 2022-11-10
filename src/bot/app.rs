@@ -1,8 +1,14 @@
-use crate::com;
+use crate::{
+    com,
+    http::web_server::{self, HttpServer},
+};
 use log::*;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
+use std::{
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 use tokio::{runtime::Builder, signal};
 
@@ -10,6 +16,7 @@ use super::{
     machine::{self, Liquidation},
     sub,
 };
+use std::net::ToSocketAddrs;
 
 pub fn run(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Result<()> {
     let tasks = match args.get_one::<usize>("tasks") {
@@ -24,6 +31,16 @@ pub fn run(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Result<()> {
         Some(i) => i.to_string(),
         None => "127.0.0.1".to_string(),
     };
+    let address = format!("{}:{}", ip, port);
+    let mut socket_addr: Option<SocketAddr> = None;
+    if port > 0 {
+        let addr = address
+            .to_socket_addrs()
+            .map_err(|e| com::CliError::HttpServerError(e.to_string()))?
+            .next()
+            .ok_or(com::CliError::HttpServerError("parsing none".to_string()))?;
+        socket_addr = Some(addr);
+    }
     let mut builder = Builder::new_multi_thread();
     match args.get_one::<usize>("threads") {
         Some(t) => {
@@ -55,9 +72,13 @@ pub fn run(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Result<()> {
         )
         .await;
         let liquidation = Liquidation::new(config.clone(), mp, tasks).await;
-        (watch, sub, liquidation)
+        // start http server
+        let web_server: Option<HttpServer> = match socket_addr {
+            Some(addr) => Some(web_server::HttpServer::new(&addr).await),
+            None => None,
+        };
+        (watch, sub, liquidation, web_server)
     });
-
     let s = runtime.block_on(async { signal::ctrl_c().await });
     match s {
         Ok(()) => {
@@ -68,10 +89,16 @@ pub fn run(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Result<()> {
         }
     }
     runtime.block_on(async {
-        let (wt, sb, lb) = task.await.unwrap();
+        let (wt, sb, lb, wb) = task.await.unwrap();
         wt.shutdown().await;
         sb.shutdown().await;
         lb.shutdown().await;
+        match wb {
+            Some(s) => {
+                s.shutdown().await;
+            }
+            None => {}
+        }
         info!("robot server shutdown!");
     });
     Ok(())

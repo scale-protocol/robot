@@ -28,6 +28,8 @@ pub enum CliError {
     PriceError(String),
     #[error("new wallet keypair error:{0}")]
     KeypairError(String),
+    #[error("Http server start error:{0}")]
+    HttpServerError(String),
 }
 pub fn id() -> Pubkey {
     Pubkey::try_from("ECte5vr5zJkRVnEPY9XPkgq3JFfFkthrMKxLk6gfa7v4").unwrap()
