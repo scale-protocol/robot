@@ -2,6 +2,8 @@ localmint:
 	spl-token create-token --decimals 6 -- local_mint.json
 	spl-token create-account -- local_mint.json
 	spl-token mint 3xJL46KjjDQbPUDg54nEzSC1Ejs49xFHwQJyEMPq7H7g 1000000000000
+transfer:
+	spl-token transfer --fund-recipient 3xJL46KjjDQbPUDg54nEzSC1Ejs49xFHwQJyEMPq7H7g 10000000000 6imhP9ec6sNXy7Dn19wq4hjL1oUtthtGHUEwtuCTGNL8
 initvault:
 	cargo run init_vault
 initmarket:
@@ -28,5 +30,5 @@ openposition:
 closeposition:
 	cargo run close_position -o 1
 bot:
-	export RUST_LOG=debug
-	cargo run bot
+	export RUST_LOG=debug && cargo run -- bot
+	# export RUST_LOG=robot::bot::machine=debug && cargo run -- bot

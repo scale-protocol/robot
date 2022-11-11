@@ -28,7 +28,7 @@ pub enum CliError {
     PriceError(String),
     #[error("new wallet keypair error:{0}")]
     KeypairError(String),
-    #[error("Http server start error:{0}")]
+    #[error("Http server error:{0}")]
     HttpServerError(String),
 }
 pub fn id() -> Pubkey {

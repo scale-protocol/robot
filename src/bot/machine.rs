@@ -4,10 +4,10 @@ use anchor_client::anchor_lang::AccountDeserialize;
 use anchor_client::solana_sdk::{account::Account, pubkey::Pubkey};
 use bond::com as bcom;
 use bond::state::{market, position, user};
-// use crossbeam_channel::{self, bounded};
 use chrono::{Datelike, NaiveDate, Utc};
 use dashmap::DashMap;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -17,7 +17,6 @@ use tokio::{
     task::JoinHandle,
     time,
 };
-
 pub enum State {
     Market(market::Market),
     User(user::UserAccount),
@@ -103,7 +102,8 @@ pub struct StateMap {
     pub user_dynamic_idx: DmUserDynamicData,
     storage: storage::Storage,
 }
-#[derive(Clone)]
+pub type SharedStateMap = Arc<StateMap>;
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDynamicData {
     pub profit: f64,
     pub margin_percentage: f64,
@@ -117,14 +117,6 @@ impl Default for UserDynamicData {
             equity: 0.0,
         }
     }
-}
-#[derive(Clone)]
-pub struct SharedState<'a> {
-    pub market: Arc<&'a DmMarket>,
-    pub user: Arc<&'a DmUser>,
-    pub position: Arc<&'a DmUserPosition>,
-    pub price_account: Arc<&'a DmPrice>,
-    pub price_idx_price_account: Arc<&'a DmIdxPriceMarket>,
 }
 
 impl StateMap {
@@ -147,7 +139,10 @@ impl StateMap {
         })
     }
 
-    pub fn load_active_account_from_local(&mut self) -> anyhow::Result<()> {
+    pub fn load_active_account_from_local(
+        &mut self,
+        pyth_price_account_sub: mpsc::UnboundedSender<Pubkey>,
+    ) -> anyhow::Result<()> {
         info!("start load active account from local!");
         let p = storage::Prefix::Active;
         let r = self.storage.scan_prefix(&p);
@@ -167,6 +162,20 @@ impl StateMap {
                     let s: State = (&values).into();
                     match s {
                         State::Market(m) => {
+                            self.price_idx_price_account
+                                .insert((&m).pyth_price_account, pbk);
+                            // send price sub
+                            match pyth_price_account_sub.send((&m).pyth_price_account) {
+                                Ok(_) => {
+                                    debug!("Send pyth price account to sub success!");
+                                }
+                                Err(e) => {
+                                    info!("Send pyth price to sub error: {}", e);
+                                }
+                            }
+
+                            self.price_idx_price_account
+                                .insert((&m).chianlink_price_account, pbk);
                             self.market.insert(pbk, m);
                         }
                         State::User(m) => {
@@ -206,7 +215,10 @@ pub struct Watch {
 }
 
 impl Watch {
-    pub async fn new<'a>(mp: Arc<StateMap>) -> Self {
+    pub async fn new<'a>(
+        mp: SharedStateMap,
+        pyth_price_account_sub: mpsc::UnboundedSender<Pubkey>,
+    ) -> Self {
         let (account_watch_tx, account_watch_rx) = mpsc::unbounded_channel::<(Pubkey, Account)>();
         let (account_shutdown_tx, account_shutdown_rx) = oneshot::channel::<()>();
         let (price_watch_tx, price_watch_rx) = mpsc::unbounded_channel::<(Pubkey, Account)>();
@@ -220,6 +232,7 @@ impl Watch {
                 mp.clone(),
                 account_watch_rx,
                 account_shutdown_rx,
+                pyth_price_account_sub,
             )),
             pw: tokio::spawn(watch_price(mp.clone(), price_watch_rx, price_shutdown_rx)),
         }
@@ -234,9 +247,10 @@ impl Watch {
 }
 
 async fn watch_account<'a>(
-    mp: Arc<StateMap>,
+    mp: SharedStateMap,
     mut watch_rx: UnboundedReceiver<(Pubkey, Account)>,
     mut shutdown_rx: oneshot::Receiver<()>,
+    pyth_price_account_sub: mpsc::UnboundedSender<Pubkey>,
 ) -> anyhow::Result<()> {
     info!("start scale program account watch ...");
     loop {
@@ -250,7 +264,7 @@ async fn watch_account<'a>(
                     Some(rs)=>{
                         let (pubkey,account) = rs;
                         debug!("account channel got data : {:?},{:?}",pubkey,account);
-                        keep_account(mp.clone(), pubkey, account);
+                        keep_account(mp.clone(), pubkey, account,pyth_price_account_sub.clone());
                     }
                     None=>{
                         debug!("account channel got none : {:?}",r);
@@ -263,7 +277,7 @@ async fn watch_account<'a>(
 }
 
 async fn watch_price(
-    mp: Arc<StateMap>,
+    mp: SharedStateMap,
     mut watch_rx: UnboundedReceiver<(Pubkey, Account)>,
     mut shutdown_rx: oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
@@ -288,7 +302,7 @@ async fn watch_price(
     Ok(())
 }
 
-fn keep_price(mp: Arc<StateMap>, pubkey: Pubkey, mut account: Account) {
+fn keep_price(mp: SharedStateMap, pubkey: Pubkey, mut account: Account) {
     match mp.price_idx_price_account.get(&pubkey) {
         Some(k) => match mp.market.get(&k) {
             Some(m) => match price::get_price_from_pyth(&pubkey, &mut account) {
@@ -312,17 +326,21 @@ fn keep_price(mp: Arc<StateMap>, pubkey: Pubkey, mut account: Account) {
         },
         None => {
             debug!(
-                "Can not found market of price account,ignore it .{}",
+                "Can not found market of price account,ignore it: {}",
                 pubkey
             );
         }
     }
 }
-fn keep_account(mp: Arc<StateMap>, pubkey: Pubkey, account: Account) {
+fn keep_account(
+    mp: SharedStateMap,
+    pubkey: Pubkey,
+    account: Account,
+    pyth_price_account_sub: mpsc::UnboundedSender<Pubkey>,
+) {
     let s: State = (&account).into();
     let tag = s.to_string();
     let keys = storage::Keys::new(storage::Prefix::Active);
-
     match s {
         State::Market(m) => {
             let pyth_account = m.pyth_price_account;
@@ -338,6 +356,15 @@ fn keep_account(mp: Arc<StateMap>, pubkey: Pubkey, account: Account) {
                 mp.price_idx_price_account.insert(pyth_account, pubkey);
                 mp.price_idx_price_account.insert(chainlink_account, pubkey);
                 save_to_active(mp, &mut keys, &account);
+                // send price sub
+                match pyth_price_account_sub.send(pyth_account) {
+                    Ok(_) => {
+                        debug!("Send pyth price account to sub success!");
+                    }
+                    Err(e) => {
+                        info!("Send pyth price to sub error: {}", e);
+                    }
+                }
             }
         }
         State::User(m) => {
@@ -346,7 +373,7 @@ fn keep_account(mp: Arc<StateMap>, pubkey: Pubkey, account: Account) {
                 mp.user.remove(&pubkey);
                 save_as_history(mp, &mut keys, &account);
             } else {
-                mp.user.insert(pubkey, m);
+                let x = mp.user.insert(pubkey, m);
                 save_to_active(mp, &mut keys, &account);
             }
         }
@@ -384,15 +411,15 @@ fn keep_account(mp: Arc<StateMap>, pubkey: Pubkey, account: Account) {
             }
         }
         State::None => {
-            error!(
-                "Unrecognized structure of account:{:?},{:?}",
-                pubkey, account
+            warn!(
+                "Unrecognized structure of account: {:?},{:?}",
+                pubkey, account,
             );
         }
     }
 }
 
-fn save_as_history(mp: Arc<StateMap>, ks: &mut storage::Keys, account: &Account) {
+fn save_as_history(mp: SharedStateMap, ks: &mut storage::Keys, account: &Account) {
     match mp.storage.save_as_history(ks, account) {
         Ok(()) => {
             debug!(
@@ -410,7 +437,7 @@ fn save_as_history(mp: Arc<StateMap>, ks: &mut storage::Keys, account: &Account)
     }
 }
 
-fn save_to_active(mp: Arc<StateMap>, ks: &mut storage::Keys, account: &Account) {
+fn save_to_active(mp: SharedStateMap, ks: &mut storage::Keys, account: &Account) {
     match mp.storage.save_to_active(ks, account) {
         Ok(()) => {
             debug!(
@@ -434,10 +461,10 @@ pub struct Liquidation {
 }
 
 impl Liquidation {
-    pub async fn new(config: config::Config, mp: Arc<StateMap>, tasks: usize) -> Self {
+    pub async fn new(config: config::Config, mp: SharedStateMap, tasks: usize) -> Self {
         let mut ts = tasks;
         if ts <= 0 {
-            ts = 10;
+            ts = 2;
         }
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let (task_ch_tx, task_ch_rx) = flume::bounded::<Pubkey>(ts);
@@ -476,7 +503,9 @@ impl Liquidation {
         });
         // Keep checking position
         let lmp = mp.clone();
+
         tokio::spawn(async move {
+            let mut count = 1u64;
             loop {
                 tokio::select! {
                     _ = send_shutdown_rx.changed() => {
@@ -485,7 +514,8 @@ impl Liquidation {
                     }
                     _=async{}=>{
                         let now = time::Instant::now();
-                        debug!("Start a new round of liquidation...");
+
+                        debug!("Start a new round of liquidation... count: {}",count);
 
                         for v in &lmp.user {
                             let pubkey = *v.key();
@@ -498,7 +528,8 @@ impl Liquidation {
                            }
                         }
                         let t = now.elapsed();
-                        debug!("Complete a new round of liquidation... use time:{:?}", t);
+                        count+=1;
+                        debug!("Complete a new round of liquidation... use time: {:?},count: {}", t,count);
                     }
                 }
             }
@@ -547,7 +578,7 @@ fn time_to_next_run() -> i64 {
 
 async fn loop_position_by_user(
     config: config::Config,
-    mp: Arc<StateMap>,
+    mp: SharedStateMap,
     task_rx: flume::Receiver<Pubkey>,
     timer_task_rx: flume::Receiver<Pubkey>,
     mut shutdown_rx: watch::Receiver<bool>,
@@ -557,9 +588,11 @@ async fn loop_position_by_user(
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {
-                info!("got shutdown signal, position loop task exit.")
+                info!("got shutdown signal, user position loop task exit.");
+                break;
             }
             r = task_rx.recv_async() => {
+                // time::sleep(time::Duration::from_secs(10)).await;
                 match r {
                     Ok(user_pubkey)=>{
                         match mp.user.get(&user_pubkey){
@@ -579,10 +612,9 @@ async fn loop_position_by_user(
                                         debug!("loop user {} positions none,continue!",user_pubkey);
                                     },
                                 }
-
                             },
                             None=>{
-                                debug!("Recv the user pubkey in task ,but get user data none");
+                                debug!("Recv the user pubkey in task ,but get user data none!");
                             }
                         }
                     }

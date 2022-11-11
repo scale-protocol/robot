@@ -35,3 +35,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.3.0", features = ["trace"] }
 tower = { version = "0.4", features = ["util", "timeout", "load-shed", "limit"] }
+headers = "0.3"

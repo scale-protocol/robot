@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use {
     crate::{com, config},
     anchor_client::solana_sdk::commitment_config::CommitmentConfig,
@@ -9,48 +11,49 @@ use {
     std::convert::TryFrom,
     tokio::{
         self,
-        sync::{mpsc, oneshot},
+        sync::{mpsc, oneshot, watch},
         task::JoinHandle,
     },
     tokio_stream::StreamExt,
 };
 
 pub struct SubAccount {
-    account_shutdown_tx: oneshot::Sender<()>,
-    price_shutdown_tx: oneshot::Sender<()>,
-    aw: JoinHandle<anyhow::Result<()>>,
+    program_shutdown_tx: oneshot::Sender<()>,
+    price_shutdown_tx: watch::Sender<bool>,
     pw: JoinHandle<anyhow::Result<()>>,
+    aw: JoinHandle<anyhow::Result<()>>,
 }
 impl SubAccount {
     pub async fn new(
         config: config::Config,
         account_watch_tx: mpsc::UnboundedSender<(Pubkey, Account)>,
         price_watch_tx: mpsc::UnboundedSender<(Pubkey, Account)>,
+        subscribe_rx: mpsc::UnboundedReceiver<Pubkey>,
     ) -> Self {
-        let (account_shutdown_tx, account_shutdown_rx) = oneshot::channel::<()>();
-        let (price_shutdown_tx, price_shutdown_rx) = oneshot::channel::<()>();
-        let pyth_price_program_pubkey = config.accounts.pyth_program_pubkey;
+        let (program_shutdown_tx, program_shutdown_rx) = oneshot::channel::<()>();
+        let (price_shutdown_tx, price_shutdown_rx) = watch::channel(false);
+        // let pyth_price_program_pubkey = config.accounts.pyth_program_pubkey;
         Self {
-            account_shutdown_tx,
+            program_shutdown_tx,
             price_shutdown_tx,
             aw: tokio::spawn(subscribe_program_accounts(
                 config.clone(),
                 com::id(),
-                account_shutdown_rx,
+                program_shutdown_rx,
                 account_watch_tx,
             )),
-            pw: tokio::spawn(subscribe_program_accounts(
+            pw: tokio::spawn(subscribe_price_accounts(
                 config.clone(),
-                pyth_price_program_pubkey,
-                price_shutdown_rx,
-                price_watch_tx,
+                subscribe_rx,
+                price_shutdown_rx.clone(),
+                price_watch_tx.clone(),
             )),
         }
     }
     pub async fn shutdown(self) {
-        let _ = self.account_shutdown_tx.send(());
+        let _ = self.program_shutdown_tx.send(());
         let _ = self.aw.await;
-        let _ = self.price_shutdown_tx.send(());
+        let _ = self.price_shutdown_tx.send(true);
         let _ = self.pw.await;
     }
 
@@ -75,6 +78,7 @@ impl SubAccount {
         Ok(())
     }
 }
+
 async fn subscribe_program_accounts(
     config: config::Config,
     program_pubkey: Pubkey,
@@ -143,7 +147,117 @@ async fn subscribe_program_accounts(
                 }
             }
             _ = (&mut shutdown_rx) => {
-                info!("got shutdown signal,account sub exit.");
+                info!("got shutdown signal, account sub exit.");
+                break;
+            },
+        }
+    }
+    Ok(())
+}
+
+async fn subscribe_price_accounts(
+    config: config::Config,
+    mut subscribe_rx: mpsc::UnboundedReceiver<Pubkey>,
+    mut shutdown_rx: watch::Receiver<bool>,
+    watch_tx: mpsc::UnboundedSender<(Pubkey, Account)>,
+) -> anyhow::Result<()> {
+    let mut price_account: HashSet<Pubkey> = HashSet::new();
+    let mut sub_tasks: Vec<JoinHandle<anyhow::Result<()>>> = Vec::new();
+    loop {
+        tokio::select! {
+            _ = shutdown_rx.changed() => {
+                info!("got shutdown signal, price accounts sub exit.");
+                for t in sub_tasks{
+                    match t.await {
+                        Ok(_)=>{
+                            info!("Close price account sub task success!");
+                        }
+                        Err(e)=>{
+                            error!("Close price account sub task error: {}", e);
+                        }
+                    }
+                }
+                break;
+            },
+            price_pubkey = subscribe_rx.recv() => {
+                match price_pubkey {
+                    Some(pubkey)=>{
+                        if !price_account.insert(pubkey) {
+                            sub_tasks.push(tokio::spawn(subscribe_one_price_account(
+                                config.clone(),
+                                pubkey,
+                                shutdown_rx.clone(),
+                                watch_tx.clone(),
+                            )));
+                        }
+                    }
+                    None=>{
+                        debug!("Sub accounts continue,got none pubkey");
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn subscribe_one_price_account(
+    config: config::Config,
+    pubkey: Pubkey,
+    mut shutdown_rx: watch::Receiver<bool>,
+    watch_tx: mpsc::UnboundedSender<(Pubkey, Account)>,
+) -> anyhow::Result<()> {
+    let sol_sub_client = pubsub_client::PubsubClient::new(config.cluster.ws_url())
+        .await
+        .map_err(|e| {
+            debug!("{:#?}", e);
+            com::CliError::SubscriptionAccountFailed(e.to_string())
+        })?;
+    info!("start pyth price account {} subscription ...", pubkey);
+    let rpc_config = RpcAccountInfoConfig {
+        encoding: Some(UiAccountEncoding::Base64Zstd),
+        commitment: Some(CommitmentConfig::finalized()),
+        data_slice: None,
+        min_context_slot: None,
+    };
+    let (mut s, _r) = sol_sub_client
+        .account_subscribe(&pubkey, Some(rpc_config))
+        .await
+        .map_err(|e| com::CliError::SubscriptionAccountFailed(e.to_string()))?;
+    let mut s = s.as_mut();
+
+    loop {
+        tokio::select! {
+            response = s.next() => {
+                match response {
+                    Some(i_account)=>{
+                        let pda_account:Option<Account> = i_account.value.decode();
+                        match pda_account {
+                            Some(account)=>{
+                                debug!("got price account: {:?} data: {:#?},len:{}",pubkey,account,account.data.len());
+                                match watch_tx.send((pubkey,account)) {
+                                    Ok(())=>{
+                                        debug!("send {:?} to price account watch success!",pubkey);
+                                    }
+                                    Err(e)=>{
+                                        error!("message channel error:{},price account sub program exit.",e);
+                                        break;
+                                    }
+                                }
+                            }
+                            None=>{
+                                error!("Can not decode price account,got None");
+                            }
+                        }
+                    }
+                    None=>{
+                        info!("message channel close");
+                        break;
+                    }
+                }
+            }
+            _ = shutdown_rx.changed() => {
+                info!("got shutdown signal,price account {} sub exit.",pubkey);
                 break;
             },
         }
