@@ -97,7 +97,7 @@ pub fn run(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Result<()> {
     let s = runtime.block_on(async { signal::ctrl_c().await });
     match s {
         Ok(()) => {
-            info!("got exit signal...Start execution exit.")
+            info!("got exit signal...start execution.")
         }
         Err(err) => {
             error!("Unable to listen for shutdown signal: {}", err);

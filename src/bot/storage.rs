@@ -1,9 +1,11 @@
 use crate::{com, config};
 use anchor_client::solana_sdk::account::Account;
 use sled::{Batch, Db};
+use solana_sdk::pubkey::Pubkey;
 use std::fmt;
 use std::str::FromStr;
 
+#[derive(Debug, Clone)]
 pub enum Prefix {
     Active = 1,
     History,
@@ -144,5 +146,12 @@ impl Storage {
             batch.insert(key.as_bytes(), value);
         }
         Ok(())
+    }
+    pub fn get_position_history_list(&self, pubkey: &Pubkey) -> sled::Iter {
+        let keys = Keys::new(Prefix::History)
+            .add("position".to_string())
+            .add(pubkey.to_string());
+        let key = keys.get_storage_key();
+        self.db.scan_prefix(key.as_bytes())
     }
 }

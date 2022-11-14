@@ -16,7 +16,7 @@ initmarket:
 inituser:
 	cargo run init_user
 deposit:
-	cargo run deposit -a 1000
+	cargo run deposit -a 1000000000
 investment:
 	cargo run investment -p 'BTC/USD' -a 100000000
 	cargo run investment -p 'ETH/USD' -a 100000000
@@ -30,5 +30,6 @@ openposition:
 closeposition:
 	cargo run close_position -o 1
 bot:
-	export RUST_LOG=debug && cargo run -- bot
 	# export RUST_LOG=robot::bot::machine=debug && cargo run -- bot
+	# export RUST_LOG=robot::http::service=debug && cargo run -- bot
+	export RUST_LOG=debug && cargo run -- bot

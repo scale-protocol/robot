@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 
 use log::info;
 
+use crate::bot;
 use axum::{
     self,
     error_handling::HandleErrorLayer,
@@ -11,15 +12,16 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, patch},
+    routing::get,
     Json, Router,
 };
+use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, time::Duration};
 use tokio::sync::oneshot;
 use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 
-use crate::bot;
+use super::service;
 // use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 pub struct HttpServer {
     shutdown_tx: oneshot::Sender<()>,
@@ -36,7 +38,9 @@ impl HttpServer {
             });
         info!("start web server ...");
         tokio::spawn(async move {
-            server.await.unwrap();
+            if let Err(e) = server.await {
+                println!("server error: {}", e);
+            }
         });
         Self { shutdown_tx }
     }
@@ -50,38 +54,68 @@ impl HttpServer {
 pub fn router(mp: bot::machine::SharedStateMap) -> Router {
     let app: Router = Router::new()
         .route("/user/info/:pubkey", get(get_user_info))
-        .route("/user/positions/:prefix", get(get_user_position_list))
+        .route(
+            "/user/positions/:prefix/:pubkey",
+            get(get_user_position_list),
+        )
         .route("/ws", get(ws_handler))
-        // .layer(
-        //     ServiceBuilder::new()
-        //         // Handle errors from middleware
-        //         .layer(HandleErrorLayer::new(handle_error))
-        //         .load_shed()
-        //         // .concurrency_limit(1024)
-        //         .timeout(Duration::from_secs(3))
-        //         .layer(
-        //             TraceLayer::new_for_http()
-        //                 .make_span_with(DefaultMakeSpan::default().include_headers(true)),
-        //         ), // .into_inner(),
-        // )
+        .layer(
+            ServiceBuilder::new()
+                // Handle errors from middleware
+                .layer(HandleErrorLayer::new(handle_error))
+                .load_shed()
+                // .concurrency_limit(1024)
+                .timeout(Duration::from_secs(3))
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(DefaultMakeSpan::default().include_headers(true)),
+                ), // .into_inner(),
+        )
         .layer(Extension(mp));
     app
 }
-
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct JsonResponse<T> {
+    code: u64,
+    message: String,
+    data: T,
+}
 async fn get_user_info(
     Path(key): Path<String>,
     Extension(state): Extension<bot::machine::SharedStateMap>,
 ) -> impl IntoResponse {
-    let result = vec!["xxx"];
-    Json(result)
+    let rs = match service::get_user_info(key, state) {
+        Ok(r) => {
+            let mut j: JsonResponse<Option<service::UserInfo>> = JsonResponse::default();
+            j.data = r;
+            j
+        }
+        Err(e) => {
+            let mut j: JsonResponse<Option<service::UserInfo>> = JsonResponse::default();
+            j.message = e.to_string();
+            j
+        }
+    };
+    Json(rs)
 }
 
 async fn get_user_position_list(
-    Path(key): Path<String>,
+    Path((prefix, pubkey)): Path<(String, String)>,
     Extension(state): Extension<bot::machine::SharedStateMap>,
 ) -> impl IntoResponse {
-    let result = vec!["yy"];
-    Json(result)
+    let rs = match service::get_position_list(state, prefix, pubkey) {
+        Ok(r) => {
+            let mut j: JsonResponse<Vec<service::PositionInfo>> = JsonResponse::default();
+            j.data = r;
+            j
+        }
+        Err(e) => {
+            let mut j: JsonResponse<Vec<service::PositionInfo>> = JsonResponse::default();
+            j.message = e.to_string();
+            j
+        }
+    };
+    Json(rs)
 }
 
 async fn handle_error(error: BoxError) -> impl IntoResponse {

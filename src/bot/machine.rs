@@ -13,10 +13,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::{
-    sync::{mpsc, oneshot, watch},
+    sync::{mpsc, oneshot},
     task::JoinHandle,
     time,
 };
+
 pub enum State {
     Market(market::Market),
     User(user::UserAccount),
@@ -100,7 +101,7 @@ pub struct StateMap {
     pub price_account: DmPrice,
     pub price_idx_price_account: DmIdxPriceMarket,
     pub user_dynamic_idx: DmUserDynamicData,
-    storage: storage::Storage,
+    pub storage: storage::Storage,
 }
 pub type SharedStateMap = Arc<StateMap>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -373,7 +374,7 @@ fn keep_account(
                 mp.user.remove(&pubkey);
                 save_as_history(mp, &mut keys, &account);
             } else {
-                let x = mp.user.insert(pubkey, m);
+                mp.user.insert(pubkey, m);
                 save_to_active(mp, &mut keys, &account);
             }
         }
@@ -399,7 +400,7 @@ fn keep_account(
             } else {
                 match mp.position.get(&m.authority) {
                     Some(p) => {
-                        p.insert(pubkey, m);
+                        p.insert(pubkey, m.clone());
                     }
                     None => {
                         let p: DmPosition = dashmap::DashMap::new();
@@ -456,8 +457,8 @@ fn save_to_active(mp: SharedStateMap, ks: &mut storage::Keys, account: &Account)
 }
 
 pub struct Liquidation {
-    shutdown_tx: watch::Sender<bool>,
-    tp: Vec<JoinHandle<anyhow::Result<()>>>,
+    shutdown_tx: oneshot::Sender<()>,
+    tp: Vec<(oneshot::Sender<()>, JoinHandle<anyhow::Result<()>>)>,
 }
 
 impl Liquidation {
@@ -466,10 +467,9 @@ impl Liquidation {
         if ts <= 0 {
             ts = 2;
         }
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
         let (task_ch_tx, task_ch_rx) = flume::bounded::<Pubkey>(ts);
         let (timer_ch_tx, timer_ch_rx) = flume::bounded::<Pubkey>(ts);
-        let mut send_shutdown_rx = shutdown_rx.clone();
 
         // The position capital fee is charged every eight hours (fixed at 0:00, 8:00 and 16:00 GMT+0)
         let tmp = mp.clone();
@@ -508,13 +508,13 @@ impl Liquidation {
             let mut count = 1u64;
             loop {
                 tokio::select! {
-                    _ = send_shutdown_rx.changed() => {
+                    _ = (&mut shutdown_rx) => {
                         info!("got shutdown signal, user loop program exit.");
                         break;
                     }
                     _=async{}=>{
                         let now = time::Instant::now();
-
+                        time::sleep(time::Duration::from_secs(5)).await;
                         debug!("Start a new round of liquidation... count: {}",count);
 
                         for v in &lmp.user {
@@ -534,17 +534,20 @@ impl Liquidation {
                 }
             }
         });
-        let mut workers: Vec<JoinHandle<anyhow::Result<()>>> = Vec::with_capacity(ts);
+        let mut workers: Vec<(oneshot::Sender<()>, JoinHandle<anyhow::Result<()>>)> =
+            Vec::with_capacity(ts);
         for _ in 0..ts {
             let cfg = config.clone();
             let smp = mp.clone();
-            workers.push(tokio::spawn(loop_position_by_user(
+            let (task_shutdown_tx, task_shutdown_rx) = oneshot::channel::<()>();
+            let task = tokio::spawn(loop_position_by_user(
                 cfg,
                 smp,
                 task_ch_rx.clone(),
                 timer_ch_rx.clone(),
-                shutdown_rx.clone(),
-            )));
+                task_shutdown_rx,
+            ));
+            workers.push((task_shutdown_tx, task));
         }
         Self {
             shutdown_tx,
@@ -552,20 +555,22 @@ impl Liquidation {
         }
     }
     pub async fn shutdown(self) {
-        _ = self.shutdown_tx.send(true);
+        _ = self.shutdown_tx.send(());
         // wait
         for v in self.tp {
-            let _ = v.await;
+            _ = v.0.send(());
+            // let _ = v.1.await;
         }
     }
 }
 // Return seconds
 fn time_to_next_run() -> i64 {
     let now = Utc::now().naive_utc();
+    let y = NaiveDate::from_ymd_opt(now.year(), now.month(), now.day()).unwrap();
     let tv = vec![
-        NaiveDate::from_ymd(now.year(), now.month(), now.day()).and_hms(0, 0, 0),
-        NaiveDate::from_ymd(now.year(), now.month(), now.day()).and_hms(8, 0, 0),
-        NaiveDate::from_ymd(now.year(), now.month(), now.day()).and_hms(16, 0, 0),
+        y.and_hms_opt(0, 0, 0).unwrap(),
+        y.and_hms_opt(8, 0, 0).unwrap(),
+        y.and_hms_opt(16, 0, 0).unwrap(),
     ];
     for v in &tv {
         let ds = v.signed_duration_since(now).num_seconds();
@@ -581,13 +586,13 @@ async fn loop_position_by_user(
     mp: SharedStateMap,
     task_rx: flume::Receiver<Pubkey>,
     timer_task_rx: flume::Receiver<Pubkey>,
-    mut shutdown_rx: watch::Receiver<bool>,
+    mut shutdown_rx: oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     info!("start position loop program...");
 
     loop {
         tokio::select! {
-            _ = shutdown_rx.changed() => {
+            _ = (&mut shutdown_rx) => {
                 info!("got shutdown signal, user position loop task exit.");
                 break;
             }
