@@ -379,16 +379,21 @@ fn keep_account(
             }
         }
         State::Position(m) => {
+            let (user_account, _bump) = Pubkey::find_program_address(
+                &[bcom::USER_ACCOUNT_SEED, &m.authority.to_bytes()],
+                &com::id(),
+            );
             let mut keys = keys
                 .add(tag)
-                .add(m.authority.to_string())
+                .add(user_account.to_string())
                 .add(pubkey.to_string());
+
             if account.lamports <= 0
                 || m.position_status == position::PositionStatus::NormalClosing
                 || m.position_status == position::PositionStatus::ForceClosing
             {
                 mp.position.remove(&pubkey);
-                match mp.position.get(&m.authority) {
+                match mp.position.get(&user_account) {
                     Some(p) => {
                         p.remove(&pubkey);
                     }
@@ -398,14 +403,14 @@ fn keep_account(
                 };
                 save_as_history(mp, &mut keys, &account);
             } else {
-                match mp.position.get(&m.authority) {
+                match mp.position.get(&user_account) {
                     Some(p) => {
                         p.insert(pubkey, m.clone());
                     }
                     None => {
                         let p: DmPosition = dashmap::DashMap::new();
                         p.insert(pubkey, m.clone());
-                        mp.position.insert(m.authority, p);
+                        mp.position.insert(user_account, p);
                     }
                 };
                 save_to_active(mp, &mut keys, &account);
@@ -704,9 +709,9 @@ fn compute_position(
         compute_pl_all_independent_position(&client, user_pubkey, position, market_mp, price_map)?;
     let equity = data_full.equity + data_independent.equity + user_account.balance;
     let data = UserDynamicData {
-        profit: data_independent.profit + data_full.profit,
-        margin_percentage: bcom::f64_round(equity / user_account.margin_total),
-        equity,
+        profit: bcom::f64_round((data_independent.profit + data_full.profit) / 1000000.0),
+        margin_percentage: bcom::f64_round((equity / user_account.margin_total) / 1000000.0),
+        equity: bcom::f64_round(equity / 1000000.0),
     };
     user_dynamic_idx_mp.insert(*user_pubkey, data);
     Ok(())

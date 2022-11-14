@@ -30,9 +30,9 @@ openposition:
 closeposition:
 	cargo run close_position -o 1
 bot:
-	# export RUST_LOG=robot::bot::machine=debug && cargo run -- bot
+	export RUST_LOG=robot::bot::machine=debug && cargo run -- bot
 	# export RUST_LOG=robot::http::service=debug && cargo run -- bot
-	export RUST_LOG=debug && cargo run -- bot
+	# export RUST_LOG=debug && cargo run -- bot
 dockerbuild:
 	export DOCKER_BUILDKIT=1 && docker build --ssh default=~/.ssh/id_rsa -t tttlkkkl/scale:latest .
 gitset:
