@@ -33,9 +33,8 @@ bot:
 	# export RUST_LOG=robot::bot::machine=debug && cargo run -- bot
 	# export RUST_LOG=robot::http::service=debug && cargo run -- bot
 	export RUST_LOG=debug && cargo run -- bot
-build:
-	cargo build --release --target x86_64-unknown-linux-musl
-	docker build -t
+dockerbuild:
+	export DOCKER_BUILDKIT=1 && docker build --ssh default=~/.ssh/id_rsa -t tttlkkkl/scale:latest .
 gitset:
 	export CARGO_NET_GIT_FETCH_WITH_CLI=true
 	git config --global url."git@github.com:".insteadOf "https://github.com/"
