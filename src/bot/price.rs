@@ -16,7 +16,8 @@ pub fn get_price_from_pyth(pubkey: &Pubkey, account: &mut Account) -> anyhow::Re
         .ok_or(com::CliError::PriceError("price none".to_string()))?;
 
     let price = bcom::f64_round(
-        current_price.price as f64 / 10u64.pow(current_price.expo.abs() as u32) as f64,
+        (current_price.price as f64 / 10u64.pow(current_price.expo.abs() as u32) as f64)
+            * bcom::DECIMALS,
     );
     Ok(price)
 }

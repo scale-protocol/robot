@@ -308,6 +308,7 @@ pub fn close_position(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Res
             user_account,
             position_account,
         })
+        .args(instruction::ClosePosition { identity: 1 })
         .send()
         .map_err(|e| debug_rpc_error(e))?;
 
@@ -327,7 +328,8 @@ position_type: {:#?}
 direction: {:#?}
 position_seed_offset: {:#?}
 profit: {:?}
-tx:{}"#,
+status: {:?}
+tx: {}"#,
         m.pair,
         position_account,
         p.open_price,
@@ -339,6 +341,7 @@ tx:{}"#,
         p.direction,
         p.position_seed_offset,
         p.profit,
+        p.position_status,
         tx
     );
     Ok(())

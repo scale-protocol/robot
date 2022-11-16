@@ -552,7 +552,7 @@ checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
 [[package]]
 name = "bond"
 version = "0.1.0"
-source = "git+https://github.com/scale-protocol/bond.git#cdddcb43a546ea4260ce15581dfa21b8629748b1"
+source = "git+https://github.com/scale-protocol/bond.git#487ffb2bc8f0ce0d8b1baa98d16b55abc95d7142"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
@@ -785,9 +785,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.0.23"
+version = "4.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eb41c13df48950b20eb4cd0eefa618819469df1bffc49d11e8487c4ba0037e5"
+checksum = "389ca505fd2c00136e0d0cd34bcd8b6bd0b59d5779aab396054b716334230c1c"
 dependencies = [
  "atty",
  "bitflags",
@@ -1730,9 +1730,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.23.0"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d87c48c02e0dc5e3b849a2041db3029fd066650f8f717c07bf8ed78ccb895cac"
+checksum = "59df7c4e19c950e6e0e868dcc0a300b09a9b88e9ec55bd879ca819087a77355d"
 dependencies = [
  "http",
  "hyper",
@@ -1893,9 +1893,12 @@ dependencies = [
 
 [[package]]
 name = "keccak"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9b7d56ba4a8344d6be9729995e6b06f928af29998cdf79fe390cbf6b1fee838"
+checksum = "3afef3b6eff9ce9d8ff9b3601125eec7f0c8cbac7abd14f355d053fa56c98768"
+dependencies = [
+ "cpufeatures",
+]
 
 [[package]]
 name = "lazy_static"
@@ -2973,7 +2976,7 @@ dependencies = [
  "axum",
  "bond",
  "chrono",
- "clap 4.0.23",
+ "clap 4.0.25",
  "dashmap 5.4.0",
  "env_logger",
  "flume",

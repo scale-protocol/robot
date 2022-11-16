@@ -709,9 +709,9 @@ fn compute_position(
         compute_pl_all_independent_position(&client, user_pubkey, position, market_mp, price_map)?;
     let equity = data_full.equity + data_independent.equity + user_account.balance;
     let data = UserDynamicData {
-        profit: bcom::f64_round((data_independent.profit + data_full.profit) / 1000000.0),
-        margin_percentage: bcom::f64_round((equity / user_account.margin_total) / 1000000.0),
-        equity: bcom::f64_round(equity / 1000000.0),
+        profit: data_independent.profit + data_full.profit,
+        margin_percentage: equity / user_account.margin_total,
+        equity,
     };
     user_dynamic_idx_mp.insert(*user_pubkey, data);
     Ok(())

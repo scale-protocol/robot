@@ -2,6 +2,7 @@ use crate::bot::{self, machine::UserDynamicData};
 use crate::bot::{machine, storage};
 use crate::com::CliError;
 use anchor_client::solana_sdk::{account::Account, pubkey::Pubkey};
+use bond::com as bcom;
 use log::*;
 
 use bond::state::{position, user};
@@ -29,11 +30,34 @@ pub fn get_user_info(
     let rs = match mp.user.get(&pubkey) {
         Some(user) => {
             let data = match mp.user_dynamic_idx.get(&pubkey) {
-                Some(d) => Some((*d.value()).clone()),
+                Some(d) => {
+                    let mut dynamic_data = machine::UserDynamicData::default();
+                    dynamic_data.equity = bcom::f64_round(d.value().equity / bcom::DECIMALS);
+                    dynamic_data.margin_percentage = bcom::f64_round(d.value().margin_percentage);
+                    dynamic_data.profit = bcom::f64_round(d.value().profit / bcom::DECIMALS);
+                    Some(dynamic_data)
+                }
                 None => None,
             };
+            let mut user_account = (*user.value()).clone();
+            user_account.margin_total = bcom::f64_round(user_account.margin_total / bcom::DECIMALS);
+            user_account.balance = bcom::f64_round(user_account.balance / bcom::DECIMALS);
+            user_account.margin_full_buy_total =
+                bcom::f64_round(user_account.margin_full_buy_total / bcom::DECIMALS);
+            user_account.margin_full_sell_total =
+                bcom::f64_round(user_account.margin_full_sell_total / bcom::DECIMALS);
+            user_account.margin_full_total =
+                bcom::f64_round(user_account.margin_full_total / bcom::DECIMALS);
+            user_account.margin_independent_buy_total = bcom::f64_round(
+                f64::from(user_account.margin_independent_buy_total) / bcom::DECIMALS,
+            );
+            user_account.margin_independent_sell_total = bcom::f64_round(
+                f64::from(user_account.margin_independent_sell_total) / bcom::DECIMALS,
+            );
+            user_account.margin_independent_total =
+                bcom::f64_round(f64::from(user_account.margin_independent_total) / bcom::DECIMALS);
             let user_info = UserInfo {
-                account: (*user.value()).clone(),
+                account: user_account,
                 dynamic_data: data,
                 pubkey,
             };
@@ -59,8 +83,20 @@ pub fn get_position_list(
             match r {
                 Some(p) => {
                     for v in p.value() {
+                        let mut p = (*v.value()).clone();
+                        p.open_price = bcom::f64_round(p.open_price / bcom::DECIMALS);
+                        p.open_real_price = bcom::f64_round(p.open_real_price / bcom::DECIMALS);
+                        if p.position_status == position::PositionStatus::ForceClosing
+                            || p.position_status == position::PositionStatus::NormalClosing
+                        {
+                            p.close_price = bcom::f64_round(p.close_price / bcom::DECIMALS);
+                            p.close_real_price =
+                                bcom::f64_round(p.close_real_price / bcom::DECIMALS);
+                        }
+                        p.profit = bcom::f64_round(p.profit / bcom::DECIMALS);
+                        p.margin = bcom::f64_round(p.margin / bcom::DECIMALS);
                         rs.push(PositionInfo {
-                            account: (*v.value()).clone(),
+                            account: p,
                             pubkey: *v.key(),
                         });
                     }
