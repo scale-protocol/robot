@@ -552,7 +552,7 @@ checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
 [[package]]
 name = "bond"
 version = "0.1.0"
-source = "git+https://github.com/scale-protocol/bond.git#487ffb2bc8f0ce0d8b1baa98d16b55abc95d7142"
+source = "git+https://github.com/scale-protocol/bond.git#6a46793dbc1bc29f2c7f655c93cdecf8ddad90b0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
