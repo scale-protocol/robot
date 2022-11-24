@@ -16,7 +16,7 @@ initmarket:
 inituser:
 	cargo run init_user
 deposit:
-	cargo run deposit -a 1000000000
+	cargo run deposit -a 100000000000
 investment:
 	cargo run investment -p 'BTC/USD' -a 10000000000000
 	cargo run investment -p 'ETH/USD' -a 10000000000000

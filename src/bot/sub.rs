@@ -161,6 +161,7 @@ async fn subscribe_price_accounts(
     mut shutdown_rx: watch::Receiver<bool>,
     watch_tx: mpsc::UnboundedSender<(Pubkey, Account)>,
 ) -> anyhow::Result<()> {
+    info!("start price account subscription ...");
     let mut price_account: HashSet<Pubkey> = HashSet::new();
     let mut sub_tasks: Vec<JoinHandle<anyhow::Result<()>>> = Vec::new();
     loop {
