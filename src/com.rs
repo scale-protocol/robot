@@ -32,7 +32,7 @@ pub enum CliError {
     HttpServerError(String),
 }
 pub fn id() -> Pubkey {
-    Pubkey::try_from("ECte5vr5zJkRVnEPY9XPkgq3JFfFkthrMKxLk6gfa7v4").unwrap()
+    Pubkey::try_from("FXUEM9ZfqeWkAtHDCoCGB7C9cwNW1JcyhXB47i9J6B37").unwrap()
 }
 pub struct Context<'a> {
     pub config: &'a config::Config,

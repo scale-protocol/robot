@@ -1,4 +1,7 @@
-use crate::bot::{self, machine::UserDynamicData};
+use crate::bot::{
+    self,
+    machine::{PositionDynamicData, UserDynamicData},
+};
 use crate::bot::{machine, storage};
 use crate::com::CliError;
 use anchor_client::solana_sdk::{account::Account, pubkey::Pubkey};
@@ -19,6 +22,7 @@ pub struct UserInfo {
 pub struct PositionInfo {
     pub account: position::Position,
     pub pubkey: Pubkey,
+    pub dynamic_data: Option<PositionDynamicData>,
 }
 
 pub fn get_user_info(
@@ -35,6 +39,7 @@ pub fn get_user_info(
                     dynamic_data.equity = bcom::f64_round(d.value().equity / bcom::DECIMALS);
                     dynamic_data.margin_percentage = bcom::f64_round(d.value().margin_percentage);
                     dynamic_data.profit = bcom::f64_round(d.value().profit / bcom::DECIMALS);
+                    dynamic_data.profit_rate = bcom::f64_round(d.value().profit_rate);
                     Some(dynamic_data)
                 }
                 None => None,
@@ -95,9 +100,15 @@ pub fn get_position_list(
                         }
                         p.profit = bcom::f64_round(p.profit / bcom::DECIMALS);
                         p.margin = bcom::f64_round(p.margin / bcom::DECIMALS);
+                        let data = mp.position_dynamic_idx.get(v.key()).map(|d| {
+                            let mut dynamic_data = machine::PositionDynamicData::default();
+                            dynamic_data.profit_rate = bcom::f64_round(d.value().profit_rate);
+                            dynamic_data
+                        });
                         rs.push(PositionInfo {
                             account: p,
                             pubkey: *v.key(),
+                            dynamic_data: data,
                         });
                     }
                 }
@@ -118,11 +129,17 @@ pub fn get_position_list(
                         let values: Account = serde_json::from_slice(v.to_vec().as_slice())
                             .map_err(|e| CliError::JsonError(e.to_string()))?;
                         let s: machine::State = (&values).into();
+                        let data = mp.position_dynamic_idx.get(&pbk).map(|d| {
+                            let mut dynamic_data = machine::PositionDynamicData::default();
+                            dynamic_data.profit_rate = bcom::f64_round(d.value().profit_rate);
+                            dynamic_data
+                        });
                         match s {
                             machine::State::Position(m) => {
                                 rs.push(PositionInfo {
                                     account: m,
                                     pubkey: pbk,
+                                    dynamic_data: data,
                                 });
                             }
                             _ => {}

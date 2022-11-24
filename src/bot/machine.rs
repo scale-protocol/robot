@@ -92,6 +92,7 @@ type DmUserPosition = DashMap<Pubkey, DmPosition>;
 type DmIdxPriceMarket = DashMap<Pubkey, Pubkey>;
 // key is user account pubkey
 type DmUserDynamicData = DashMap<Pubkey, UserDynamicData>;
+type DmPositionDynamicData = DashMap<Pubkey, PositionDynamicData>;
 
 #[derive(Clone)]
 pub struct StateMap {
@@ -101,6 +102,7 @@ pub struct StateMap {
     pub price_account: DmPrice,
     pub price_idx_price_account: DmIdxPriceMarket,
     pub user_dynamic_idx: DmUserDynamicData,
+    pub position_dynamic_idx: DmPositionDynamicData,
     pub storage: storage::Storage,
 }
 pub type SharedStateMap = Arc<StateMap>;
@@ -109,14 +111,26 @@ pub struct UserDynamicData {
     pub profit: f64,
     pub margin_percentage: f64,
     pub equity: f64,
+    pub profit_rate: f64,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PositionDynamicData {
+    pub profit_rate: f64,
+}
+
 impl Default for UserDynamicData {
     fn default() -> Self {
         UserDynamicData {
             profit: 0.0,
             margin_percentage: 0.0,
             equity: 0.0,
+            profit_rate: 0.0,
         }
+    }
+}
+impl Default for PositionDynamicData {
+    fn default() -> Self {
+        PositionDynamicData { profit_rate: 0.0 }
     }
 }
 
@@ -129,6 +143,7 @@ impl StateMap {
         let price_account: DmPrice = DashMap::new();
         let price_idx_price_account: DmIdxPriceMarket = DashMap::new();
         let user_dynamic_idx: DmUserDynamicData = DashMap::new();
+        let position_dynamic_idx: DmPositionDynamicData = DashMap::new();
         Ok(Self {
             market,
             user,
@@ -137,6 +152,7 @@ impl StateMap {
             price_account,
             price_idx_price_account,
             user_dynamic_idx,
+            position_dynamic_idx,
         })
     }
 
@@ -308,7 +324,7 @@ fn keep_price(mp: SharedStateMap, pubkey: Pubkey, mut account: Account) {
         Some(k) => match mp.market.get(&k) {
             Some(m) => match price::get_price_from_pyth(&pubkey, &mut account) {
                 Ok(p) => {
-                    let spread = com::f64_round(p * m.spread);
+                    let spread = m.spread;
                     let price = market::Price {
                         buy_price: com::f64_round(p + spread),
                         sell_price: com::f64_round(p - spread),
@@ -609,7 +625,7 @@ async fn loop_position_by_user(
                             Some(v)=>{
                                 match mp.position.get(&user_pubkey) {
                                     Some(ps) => {
-                                        match compute_position(&config,&user_pubkey,&v,&ps.value(),&mp.market,&mp.price_account,&mp.user_dynamic_idx){
+                                        match compute_position(&config,&user_pubkey,&v,&ps.value(),&mp.market,&mp.price_account,&mp.user_dynamic_idx,&mp.position_dynamic_idx){
                                             Ok(())=>{
                                                 debug!("loop user {} success!",user_pubkey);
                                             }
@@ -694,6 +710,7 @@ fn compute_position(
     market_mp: &DmMarket,
     price_map: &DmPrice,
     user_dynamic_idx_mp: &DmUserDynamicData,
+    position_dynamic_idx_mp: &DmPositionDynamicData,
 ) -> anyhow::Result<()> {
     debug!("compute user's position: {}", user_pubkey);
     let client = com::Context::new_client(config)?;
@@ -704,14 +721,23 @@ fn compute_position(
         user_account,
         market_mp,
         price_map,
+        position_dynamic_idx_mp,
     )?;
-    let data_independent =
-        compute_pl_all_independent_position(&client, user_pubkey, position, market_mp, price_map)?;
+    let data_independent = compute_pl_all_independent_position(
+        &client,
+        user_pubkey,
+        position,
+        market_mp,
+        price_map,
+        position_dynamic_idx_mp,
+    )?;
     let equity = data_full.equity + data_independent.equity + user_account.balance;
+    let profit = data_independent.profit + data_full.profit;
     let data = UserDynamicData {
-        profit: data_independent.profit + data_full.profit,
+        profit,
         margin_percentage: equity / user_account.margin_total,
         equity,
+        profit_rate: profit / user_account.margin_total,
     };
     user_dynamic_idx_mp.insert(*user_pubkey, data);
     Ok(())
@@ -723,6 +749,7 @@ pub fn compute_pl_all_independent_position(
     positions: &DmPosition,
     market_mp: &DmMarket,
     price_map: &DmPrice,
+    position_dynamic_idx_mp: &DmPositionDynamicData,
 ) -> anyhow::Result<UserDynamicData> {
     let mut data = UserDynamicData::default();
 
@@ -739,6 +766,12 @@ pub fn compute_pl_all_independent_position(
                         pl + market.get_position_fund(v.direction.clone(), v.get_fund_size());
                     let equity = v.margin + total_pl;
                     data.equity = equity;
+                    position_dynamic_idx_mp.insert(
+                        *v.key(),
+                        PositionDynamicData {
+                            profit_rate: pl / v.margin,
+                        },
+                    );
                     if equity / v.margin < bcom::BURST_RATE {
                         match client::burst_position(
                             anchor_client,
@@ -795,6 +828,7 @@ pub fn compute_pl_all_full_position(
     user_account_data: &user::UserAccount,
     market_mp: &DmMarket,
     price_map: &DmPrice,
+    position_dynamic_idx_mp: &DmPositionDynamicData,
 ) -> anyhow::Result<UserDynamicData> {
     let btc_price = price_map
         .get(config.get_pyth_btc_pubkey())
@@ -814,57 +848,77 @@ pub fn compute_pl_all_full_position(
     let mut position_sort: Vec<PositionSort> = Vec::with_capacity(headers.len());
 
     for header in headers.iter() {
-        let (profit_and_fund_rate, market_pubkey) = match header.market {
+        let (position_pubkey, _pbump) = Pubkey::find_program_address(
+            &[
+                bcom::POSITION_ACCOUNT_SEED,
+                &user_account_data.authority.to_bytes(),
+                &user_pubkey.to_bytes(),
+                &header.position_seed_offset.to_string().as_bytes(),
+            ],
+            &com::id(),
+        );
+        let (profit_and_fund_rate, market_pubkey, pl) = match header.market {
             bcom::FullPositionMarket::BtcUsd => {
-                let mut pl = header.get_pl_price(btc_price.value());
+                let pl = header.get_pl_price(btc_price.value());
                 data.profit += pl;
+                let mut profit_and_fund_rate: f64 = 0.0;
                 let market_account = bcom::FullPositionMarket::BtcUsd.to_pubkey().0;
                 match market_mp.get(&market_account) {
                     Some(v) => {
-                        pl += v.get_position_fund(header.direction.clone(), header.get_fund_size());
+                        profit_and_fund_rate = pl
+                            + v.get_position_fund(header.direction.clone(), header.get_fund_size());
                     }
                     None => {
                         debug!("missing BTC/USD account data. full position compute continue");
                         continue;
                     }
                 }
-                (pl, Some(market_account))
+                (profit_and_fund_rate, Some(market_account), pl)
             }
 
             bcom::FullPositionMarket::EthUsd => {
-                let mut pl = header.get_pl_price(eth_price.value());
+                let pl = header.get_pl_price(eth_price.value());
                 data.profit += pl;
                 let market_account = bcom::FullPositionMarket::EthUsd.to_pubkey().0;
+                let mut profit_and_fund_rate: f64 = 0.0;
                 match market_mp.get(&market_account) {
                     Some(v) => {
-                        pl += v.get_position_fund(header.direction.clone(), header.get_fund_size());
+                        profit_and_fund_rate = pl
+                            + v.get_position_fund(header.direction.clone(), header.get_fund_size());
                     }
                     None => {
                         debug!("missing ETH/USD account data. full position compute continue");
                         continue;
                     }
                 }
-                (pl, Some(market_account))
+                (profit_and_fund_rate, Some(market_account), pl)
             }
 
             bcom::FullPositionMarket::SolUsd => {
-                let mut pl = header.get_pl_price(sol_price.value());
+                let pl = header.get_pl_price(sol_price.value());
                 data.profit += pl;
                 let market_account = bcom::FullPositionMarket::SolUsd.to_pubkey().0;
+                let mut profit_and_fund_rate: f64 = 0.0;
                 match market_mp.get(&market_account) {
                     Some(v) => {
-                        pl += v.get_position_fund(header.direction.clone(), header.get_fund_size());
+                        profit_and_fund_rate = pl
+                            + v.get_position_fund(header.direction.clone(), header.get_fund_size());
                     }
                     None => {
                         debug!("missing SOL/USD account data. full position compute continue");
                         continue;
                     }
                 }
-                (pl, Some(market_account))
+                (profit_and_fund_rate, Some(market_account), pl)
             }
-            _ => (0.0, None),
+            _ => (0.0, None, 0.0),
         };
-
+        position_dynamic_idx_mp.insert(
+            position_pubkey,
+            PositionDynamicData {
+                profit_rate: pl / header.margin,
+            },
+        );
         position_sort.push(PositionSort {
             profit: (profit_and_fund_rate * 100.0) as i64,
             offset: header.position_seed_offset,

@@ -238,6 +238,12 @@ pub fn open_position(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Resu
     let p: position::Position = program
         .account(position_account)
         .map_err(|e| debug_rpc_error(e))?;
+    let m: market::Market = program
+        .account(market_account)
+        .map_err(|e| debug_rpc_error(e))?;
+    let u: user::UserAccount = program
+        .account(user_account)
+        .map_err(|e| debug_rpc_error(e))?;
     println!(
         r#"open position success!
 market pair: {:?}
@@ -249,7 +255,11 @@ margin: {:#?}
 position_type: {:#?}
 direction: {:#?}
 position_seed_offset: {:#?}
-tx:{}"#,
+tx:{}
+--------------
+market: {:#?}
+--------------
+use_account: {:#?}"#,
         pair,
         position_account,
         p.open_price,
@@ -259,10 +269,13 @@ tx:{}"#,
         p.position_type,
         p.direction,
         p.position_seed_offset,
-        tx
+        tx,
+        m,
+        u
     );
     Ok(())
 }
+
 pub fn close_position(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Result<()> {
     let program = ctx.client.program(com::id());
     let (user_account, _bump) = Pubkey::find_program_address(
@@ -315,6 +328,12 @@ pub fn close_position(ctx: com::Context, args: &clap::ArgMatches) -> anyhow::Res
     let p: position::Position = program
         .account(position_account)
         .map_err(|e| debug_rpc_error(e))?;
+    let m: market::Market = program
+        .account(p.market_account)
+        .map_err(|e| debug_rpc_error(e))?;
+    let u: user::UserAccount = program
+        .account(user_account)
+        .map_err(|e| debug_rpc_error(e))?;
     println!(
         r#"close position success!
 market pair: {:?}
@@ -329,7 +348,11 @@ direction: {:#?}
 position_seed_offset: {:#?}
 profit: {:?}
 status: {:?}
-tx: {}"#,
+tx: {}
+--------------
+market: {:#?}
+--------------
+use_account: {:#?}"#,
         m.pair,
         position_account,
         p.open_price,
@@ -342,7 +365,9 @@ tx: {}"#,
         p.position_seed_offset,
         p.profit,
         p.position_status,
-        tx
+        tx,
+        m,
+        u
     );
     Ok(())
 }
