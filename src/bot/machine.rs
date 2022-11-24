@@ -321,26 +321,27 @@ async fn watch_price(
 
 fn keep_price(mp: SharedStateMap, pubkey: Pubkey, mut account: Account) {
     match mp.price_idx_price_account.get(&pubkey) {
-        Some(k) => match mp.market.get(&k) {
-            Some(m) => match price::get_price_from_pyth(&pubkey, &mut account) {
-                Ok(p) => {
-                    let spread = m.spread;
-                    let price = market::Price {
-                        buy_price: com::f64_round(p + spread),
-                        sell_price: com::f64_round(p - spread),
-                        real_price: p,
-                        spread,
-                    };
-                    mp.price_account.insert(pubkey, price);
+        Some(k) => {
+            if let Some(m) = mp.market.get(&k) {
+                match price::get_price_from_pyth(&pubkey, &mut account) {
+                    Ok(p) => {
+                        let spread = m.spread;
+                        let price = market::Price {
+                            buy_price: com::f64_round(p + spread),
+                            sell_price: com::f64_round(p - spread),
+                            real_price: p,
+                            spread,
+                        };
+                        mp.price_account.insert(pubkey, price);
+                    }
+                    Err(e) => {
+                        error!("{}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("{}", e);
-                }
-            },
-            None => {
+            } else {
                 error!("keep price error,get index but cannot get market data");
             }
-        },
+        }
         None => {
             debug!(
                 "Can not found market of price account,ignore it: {}",
@@ -857,59 +858,53 @@ pub fn compute_pl_all_full_position(
             ],
             &com::id(),
         );
-        let (profit_and_fund_rate, market_pubkey, pl) = match header.market {
+        let (fund_rate, market_pubkey, pl) = match header.market {
             bcom::FullPositionMarket::BtcUsd => {
                 let pl = header.get_pl_price(btc_price.value());
                 data.profit += pl;
-                let mut profit_and_fund_rate: f64 = 0.0;
                 let market_account = bcom::FullPositionMarket::BtcUsd.to_pubkey().0;
-                match market_mp.get(&market_account) {
+                let fund_rate = match market_mp.get(&market_account) {
                     Some(v) => {
-                        profit_and_fund_rate = pl
-                            + v.get_position_fund(header.direction.clone(), header.get_fund_size());
+                        v.get_position_fund(header.direction.clone(), header.get_fund_size())
                     }
                     None => {
                         debug!("missing BTC/USD account data. full position compute continue");
-                        continue;
+                        0.0
                     }
-                }
-                (profit_and_fund_rate, Some(market_account), pl)
+                };
+                (fund_rate, Some(market_account), pl)
             }
 
             bcom::FullPositionMarket::EthUsd => {
                 let pl = header.get_pl_price(eth_price.value());
                 data.profit += pl;
                 let market_account = bcom::FullPositionMarket::EthUsd.to_pubkey().0;
-                let mut profit_and_fund_rate: f64 = 0.0;
-                match market_mp.get(&market_account) {
+                let fund_rate = match market_mp.get(&market_account) {
                     Some(v) => {
-                        profit_and_fund_rate = pl
-                            + v.get_position_fund(header.direction.clone(), header.get_fund_size());
+                        v.get_position_fund(header.direction.clone(), header.get_fund_size())
                     }
                     None => {
                         debug!("missing ETH/USD account data. full position compute continue");
-                        continue;
+                        0.0
                     }
-                }
-                (profit_and_fund_rate, Some(market_account), pl)
+                };
+                (fund_rate, Some(market_account), pl)
             }
 
             bcom::FullPositionMarket::SolUsd => {
                 let pl = header.get_pl_price(sol_price.value());
                 data.profit += pl;
                 let market_account = bcom::FullPositionMarket::SolUsd.to_pubkey().0;
-                let mut profit_and_fund_rate: f64 = 0.0;
-                match market_mp.get(&market_account) {
+                let fund_rate = match market_mp.get(&market_account) {
                     Some(v) => {
-                        profit_and_fund_rate = pl
-                            + v.get_position_fund(header.direction.clone(), header.get_fund_size());
+                        v.get_position_fund(header.direction.clone(), header.get_fund_size())
                     }
                     None => {
                         debug!("missing SOL/USD account data. full position compute continue");
-                        continue;
+                        0.0
                     }
-                }
-                (profit_and_fund_rate, Some(market_account), pl)
+                };
+                (fund_rate, Some(market_account), pl)
             }
             _ => (0.0, None, 0.0),
         };
@@ -919,6 +914,8 @@ pub fn compute_pl_all_full_position(
                 profit_rate: pl / header.margin,
             },
         );
+        let profit_and_fund_rate = pl + fund_rate;
+
         position_sort.push(PositionSort {
             profit: (profit_and_fund_rate * 100.0) as i64,
             offset: header.position_seed_offset,
