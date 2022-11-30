@@ -96,7 +96,7 @@ async fn subscribe_program_accounts(
         filters: None,
         account_config: RpcAccountInfoConfig {
             encoding: Some(UiAccountEncoding::Base64Zstd),
-            commitment: Some(CommitmentConfig::finalized()),
+            commitment: Some(CommitmentConfig::processed()),
             data_slice: None,
             min_context_slot: None,
         },
@@ -217,7 +217,7 @@ async fn subscribe_one_price_account(
     info!("start pyth price account {} subscription ...", pubkey);
     let rpc_config = RpcAccountInfoConfig {
         encoding: Some(UiAccountEncoding::Base64Zstd),
-        commitment: Some(CommitmentConfig::finalized()),
+        commitment: Some(CommitmentConfig::processed()),
         data_slice: None,
         min_context_slot: None,
     };

@@ -3,7 +3,7 @@ localmint:
 	spl-token create-account -- local_mint.json
 	spl-token mint 3xJL46KjjDQbPUDg54nEzSC1Ejs49xFHwQJyEMPq7H7g 60000000000000
 transfer:
-	spl-token transfer --fund-recipient 3xJL46KjjDQbPUDg54nEzSC1Ejs49xFHwQJyEMPq7H7g 10000000000 6imhP9ec6sNXy7Dn19wq4hjL1oUtthtGHUEwtuCTGNL8
+	spl-token transfer --allow-unfunded-recipient --fund-recipient 3xJL46KjjDQbPUDg54nEzSC1Ejs49xFHwQJyEMPq7H7g 10000000000 5DQDY9SeoHmwuNQBPeu5Hm3EbmwKuRwJDo9MgktXk3cD
 initvault:
 	cargo run init_vault
 initmarket:
